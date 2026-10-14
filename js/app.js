@@ -579,7 +579,15 @@
       setChildren(summary,
         el("span", { text: list.length.toLocaleString() + " of " + plural(Store.size(), "card") +
                      " · release order · Cameo/Featured edits apply to every finish of a card" }),
-        list.length ? delBtn : null);
+        list.length
+          ? el("div", { class: "row wrap summary-actions" },
+              sizeControl(),
+              el("button", {
+                text: "Large view", title: "See cards one at a time, big, with the tag boxes beside them",
+                onclick: function () { openViewer(list[0].cardId); }
+              }),
+              delBtn)
+          : null);
 
       if (!list.length) {
         setChildren(results, emptyMessage());
@@ -587,7 +595,7 @@
         return;
       }
 
-      const table = el("table", { class: "cards" },
+      const table = el("table", { class: "cards thumbs-" + thumbSize() },
         el("thead", {}, el("tr", {},
           ["", "Name", "Set", "No.", "Finish", "Lang", "Released", "Rarity", "Dex", "Featured", "Cameo", ""]
             .map(function (h) { return el("th", { text: h }); }))),
@@ -610,8 +618,36 @@
       results);
   }
 
-  function thumbUrl(url) {
-    return url ? url.replace(/\/high\.png$/, "/low.png") : "";
+  // Collection image sizes. TCGdex "low" images are 245px wide, so the
+  // large size uses the full-resolution image to stay sharp.
+  const THUMB_SIZES = {
+    s: { label: "Small",  w: 40,  h: 55,  quality: "low" },
+    m: { label: "Medium", w: 90,  h: 124, quality: "low" },
+    l: { label: "Large",  w: 160, h: 220, quality: "high" }
+  };
+
+  function thumbSize() {
+    const k = Prefs.get("thumbSize", "m");
+    return THUMB_SIZES[k] ? k : "m";
+  }
+
+  function thumbUrl(url, quality) {
+    if (!url) { return ""; }
+    return quality === "high" ? url : url.replace(/\/high\.png$/, "/low.png");
+  }
+
+  function sizeControl() {
+    const current = thumbSize();
+    return el("div", { class: "seg", role: "group", "aria-label": "Image size" },
+      el("span", { class: "seg-label", text: "Images" }),
+      Object.keys(THUMB_SIZES).map(function (k) {
+        return el("button", {
+          class: "seg-btn" + (k === current ? " active" : ""),
+          "aria-pressed": String(k === current),
+          text: THUMB_SIZES[k].label,
+          onclick: function () { Prefs.set("thumbSize", k); refreshResults(); }
+        });
+      }));
   }
 
   function tagLabel(c) {
@@ -647,9 +683,14 @@
   }
 
   function cardRow(c) {
+    const size = THUMB_SIZES[thumbSize()];
     return el("tr", {},
       el("td", { class: "thumb" }, c.imageUrl
-        ? el("img", { src: thumbUrl(c.imageUrl), alt: "", loading: "lazy", width: 40, height: 55 })
+        ? el("button", {
+            class: "thumb-btn", title: "Open large view",
+            "aria-label": "Open large view of " + c.name + ", " + c.set,
+            onclick: function () { openViewer(c.cardId); }
+          }, el("img", { src: thumbUrl(c.imageUrl, size.quality), alt: "", loading: "lazy", width: size.w, height: size.h }))
         : el("span", { class: "noimg-sm", text: "—" })),
       el("td", { class: "name", text: c.name }),
       el("td", { class: "set" },
@@ -669,6 +710,158 @@
         text: "×",
         onclick: function () { Store.remove([c.id]); }
       })));
+  }
+
+  // ---- Large view (one card at a time, for tagging) ------------------
+
+  /**
+   * Opens a big image of each card in the current filter, with the Cameo
+   * and Featured boxes beside it. Steps through cards, not finishes —
+   * a tag covers every finish (and language) of a card anyway.
+   * Enter saves and moves on; Esc closes. ← / → also step when the cursor
+   * isn't in a text box (in a box they move the cursor, as usual).
+   */
+  function openViewer(startCardId) {
+    const cards = [];
+    const extra = new Map();   // cardId -> { variants: Set, langs: Set }
+    Collection.filter(state.filter).forEach(function (c) {
+      if (!extra.has(c.cardId)) {
+        extra.set(c.cardId, { variants: new Set(), langs: new Set() });
+        cards.push(c);
+      }
+      extra.get(c.cardId).variants.add(c.variant);
+      extra.get(c.cardId).langs.add(LANG_NAMES[c.language] || c.language);
+    });
+    if (!cards.length) { return; }
+
+    let i = Math.max(0, cards.findIndex(function (c) { return c.cardId === startCardId; }));
+    const touchScreen = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+
+    const img     = el("img", { class: "viewer-img", alt: "" });
+    const noImg   = el("div", { class: "viewer-noimg", text: "No image available" });
+    const title   = el("h2", { class: "viewer-title" });
+    const meta    = el("p", { class: "viewer-meta" });
+    const more    = el("p", { class: "viewer-more" });
+    const counter = el("span", { class: "viewer-count" });
+    const cameo   = el("input", { type: "text", autocomplete: "off", placeholder: "e.g. 25, 133" });
+    const featured = el("input", { type: "text", autocomplete: "off" });
+    const prevBtn = el("button", { text: "← Previous", onclick: function () { go(i - 1); } });
+    const nextBtn = el("button", { class: "primary", text: "Next →", onclick: function () { go(i + 1); } });
+
+    // One panel fills the dialog, so only clicks on the dimmed backdrop close it.
+    const dlg = el("dialog", { class: "viewer", "aria-label": "Large card view" },
+      el("div", { class: "viewer-body" },
+      el("div", { class: "viewer-art" }, img, noImg),
+      el("div", { class: "viewer-side" },
+        el("div", { class: "viewer-top" },
+          counter,
+          el("button", { class: "icon-btn", text: "×", "aria-label": "Close large view", title: "Close (Esc)",
+                         onclick: function () { closeViewer(); } })),
+        title, meta, more,
+        field("Cameo (dex numbers of other Pokémon in the art)", cameo),
+        field("Featured", featured),
+        el("p", { class: "hint", text: "Tags apply to every finish of this card. Enter saves and goes to the next card; Esc closes." }),
+        el("div", { class: "row viewer-nav" }, prevBtn, nextBtn))));
+
+    /** Saves whatever changed in the two boxes for the current card. */
+    function commit() {
+      const c = cards[i];
+      [[cameo, "cameo", Collection.cameo(c)], [featured, "featured", Collection.featured(c)]]
+        .forEach(function (x) {
+          const value = x[0].value.trim();
+          if (value !== (x[2] || "")) {
+            state.quiet = true;
+            try {
+              Tags.set(c.cardId, x[1], value, tagLabel(c));
+            } finally {
+              state.quiet = false;
+            }
+          }
+        });
+    }
+
+    function go(n) {
+      commit();
+      if (n < 0 || n >= cards.length) { return; }
+      i = n;
+      render();
+    }
+
+    function render() {
+      const c = cards[i];
+      const info = extra.get(c.cardId);
+
+      img.hidden = !c.imageUrl;
+      noImg.hidden = !!c.imageUrl;
+      if (c.imageUrl) {
+        img.src = c.imageUrl;
+        img.alt = c.name + ", " + c.set;
+      }
+      counter.textContent = "Card " + (i + 1).toLocaleString() + " of " + cards.length.toLocaleString();
+      title.textContent = c.name;
+      meta.textContent = [c.set, Collection.displayNumber(c), c.releaseDate || c.year].filter(Boolean).join(" · ");
+      more.textContent = Array.from(info.variants).join(", ") + " · " + Array.from(info.langs).join(", ") +
+                         (c.dex ? " · Dex " + c.dex : "");
+      cameo.value = Collection.cameo(c);
+      featured.value = Collection.featured(c);
+      prevBtn.disabled = i === 0;
+      nextBtn.disabled = i === cards.length - 1;
+      // On a computer, be ready to type. On a phone, don't pop the keyboard
+      // up over the picture every time — tap the box when you need it.
+      if (!touchScreen) {
+        cameo.focus();
+        cameo.select();
+      }
+
+      // Load the neighbours' images now so stepping feels instant.
+      [cards[i + 1], cards[i - 1]].forEach(function (n) {
+        if (n && n.imageUrl) { new Image().src = n.imageUrl; }
+      });
+    }
+
+    [cameo, featured].forEach(function (inp) {
+      inp.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (i < cards.length - 1) { go(i + 1); } else { commit(); }
+        }
+      });
+    });
+
+    /**
+     * Saves, closes, removes the viewer and refreshes the table. Every way
+     * out goes through here rather than relying on the dialog's own
+     * "close" event, which not every browser fires reliably.
+     */
+    let closed = false;
+    function closeViewer() {
+      if (closed) { return; }
+      closed = true;
+      commit();
+      if (dlg.open) { dlg.close(); }
+      dlg.remove();
+      if (refreshResults) { refreshResults(); }
+    }
+
+    dlg.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); closeViewer(); return; }
+      if (e.target.tagName === "INPUT") { return; }
+      if (e.key === "ArrowRight") { e.preventDefault(); go(i + 1); }
+      if (e.key === "ArrowLeft")  { e.preventDefault(); go(i - 1); }
+    });
+
+    // The browser's own Esc handling, and any other close, end up here too.
+    dlg.addEventListener("cancel", function (e) { e.preventDefault(); closeViewer(); });
+    dlg.addEventListener("close", closeViewer);
+
+    // Click outside the panel closes it.
+    dlg.addEventListener("click", function (e) {
+      if (e.target === dlg) { closeViewer(); }
+    });
+
+    document.body.append(dlg);
+    dlg.showModal();
+    render();
   }
 
   /** Asks the browser to keep our storage (it may decide silently). */

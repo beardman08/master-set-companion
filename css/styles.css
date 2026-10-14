@@ -319,7 +319,82 @@ table.cards { border-collapse: collapse; width: 100%; font-size: 14px; }
 }
 .cards tr:last-child td { border-bottom: 0; }
 .cards .thumb { width: 52px; }
-.cards .thumb img { display: block; width: 40px; height: 55px; object-fit: contain; }
+.cards .thumb img { display: block; width: 40px; height: 55px; object-fit: contain; border-radius: 3px; }
+.cards.thumbs-m .thumb { width: 102px; }
+.cards.thumbs-m .thumb img { width: 90px; height: 124px; border-radius: 5px; }
+.cards.thumbs-l .thumb { width: 172px; }
+.cards.thumbs-l .thumb img { width: 160px; height: 220px; border-radius: 7px; }
+
+/* Thumbnails are buttons that open the large view. */
+.thumb-btn {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+  border-radius: 6px;
+}
+.thumb-btn:hover:not(:disabled) { background: none; }
+.thumb-btn:hover img { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Small / Medium / Large switch. */
+.summary-actions { gap: 10px; }
+.seg { display: inline-flex; align-items: center; gap: 0; }
+.seg-label { font-size: 13px; color: var(--ink-2); margin-right: 8px; }
+.seg-btn { border-radius: 0; margin-left: -1px; padding: 6px 12px; font-size: 13px; }
+.seg-btn:first-of-type { border-radius: 8px 0 0 8px; margin-left: 0; }
+.seg-btn:last-of-type { border-radius: 0 8px 8px 0; }
+.seg-btn.active,
+.seg-btn.active:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); position: relative; }
+
+/* ---- Large view ------------------------------------------------ */
+
+dialog.viewer {
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  width: min(1100px, 96vw);
+  max-height: 94vh;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .35);
+}
+dialog.viewer::backdrop { background: rgba(0, 0, 0, .6); }
+.viewer-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  min-height: min(80vh, 760px);
+}
+.viewer-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: var(--surface-2);
+  border-radius: 14px 0 0 14px;
+}
+.viewer-img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(94vh - 36px);
+  object-fit: contain;
+  border-radius: 14px;
+}
+.viewer-noimg { color: var(--ink-3); font-size: 18px; }
+.viewer-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+}
+.viewer-top { display: flex; align-items: center; justify-content: space-between; }
+.viewer-count { font-size: 13px; color: var(--ink-3); }
+.viewer-title { font-size: 22px; margin: 0; }
+.viewer-meta { color: var(--ink-2); }
+.viewer-more { color: var(--ink-3); font-size: 13px; }
+.viewer-nav { margin-top: auto; justify-content: space-between; }
+.viewer-nav button { flex: 1; }
 .cards .name { font-weight: 600; }
 .cards .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cards .set { min-width: 160px; }
@@ -462,6 +537,15 @@ table.cards { border-collapse: collapse; width: 100%; font-size: 14px; }
   .row { flex-wrap: wrap; }
   .row > .grow { flex-basis: 100%; }
   .cricut-out { flex-direction: column; }
+
+  /* Large view: picture on top, tag boxes below. */
+  dialog.viewer { max-height: 96vh; }
+  .viewer-body { grid-template-columns: 1fr; min-height: 0; }
+  .viewer-art { border-radius: 14px 14px 0 0; padding: 12px; }
+  .viewer-img { max-height: 50vh; border-radius: 10px; }
+  /* Previous / Next right under the counter, so they're reachable without scrolling. */
+  .viewer-top { order: -2; }
+  .viewer-nav { order: -1; margin-top: 0; flex-wrap: nowrap; }
 }
 
 @media (max-width: 520px) {
