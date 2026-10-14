@@ -163,7 +163,12 @@ const Cloud = (function () {
 
   function onSnapshotError(err) {
     if (unsubscribe) { unsubscribe(); unsubscribe = null; }
-    setStatus(err.code === "permission-denied" ? "denied" : "error", friendly(err));
+    let message = friendly(err);
+    if (err.code === "permission-denied" && state.email) {
+      // Show the exact address so it can be compared with the one in the rules.
+      message += " You're signed in as " + state.email + ".";
+    }
+    setStatus(err.code === "permission-denied" ? "denied" : "error", message);
   }
 
   function listen() {
