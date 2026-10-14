@@ -12,6 +12,7 @@
 
 (function () {
 
+  const LIVE_SITE = "https://beardman08.github.io/master-set-companion/";
   const PAGE_SIZE = 200;           // collection rows shown per "Show more"
   const PRINT_PER_PAGE = 9;        // 3×3 cards on Letter
   const MAX_PRINT_CARDS = 900;     // 100 pages — more than that, filter first
@@ -86,28 +87,68 @@
   }
 
 
-  // ---- Tags file status (header button + banner) -------------------
+  // ---- Where tags are saved (header button + banner) ----------------
+
+  function cloudTrouble() {
+    const c = Cloud.state();
+    return c.status === "denied" || (c.status === "error" && Cloud.AVAILABLE);
+  }
 
   function renderTagsStatus() {
     const s = Tags.state();
+    const c = Cloud.state();
     const pill = $("tagsPill");
-    const LABELS = {
-      unsupported: ["Tags: this browser only", "warn"],
-      local:       ["Tags: not saved to a file", "warn"],
-      reconnect:   ["Tags: click to reconnect", "warn"],
-      saving:      ["Tags: saving…", ""],
-      saved:       ["Tags saved ✓", "ok"],
-      error:       ["Tags: save problem", "error"]
-    };
-    const l = LABELS[s.status] || LABELS.local;
-    pill.textContent = l[0];
-    pill.className = "pill " + l[1];
-    pill.title = s.fileName ? "Tags file: " + s.fileName : "Where your Cameo and Featured tags are saved";
 
-    // Banner: nudge until tags are safely in a file.
+    let label;
+    if (Cloud.signedIn() || cloudTrouble() || c.status === "signing-in") {
+      const CLOUD = {
+        "signing-in": ["Signing in…", ""],
+        syncing:      ["Syncing…", ""],
+        synced:       ["Synced ✓", "ok"],
+        offline:      ["Offline — will sync", "warn"],
+        denied:       ["Sync not allowed", "error"],
+        error:        ["Sync problem", "error"]
+      };
+      label = CLOUD[c.status] || CLOUD.synced;
+      pill.title = c.email ? "Tags sync to the cloud as " + c.email : "Cloud sync of your tags";
+    } else {
+      const FILE = {
+        unsupported: ["Tags: this browser only", "warn"],
+        local:       ["Tags: not saved to a file", "warn"],
+        reconnect:   ["Tags: click to reconnect", "warn"],
+        saving:      ["Tags: saving…", ""],
+        saved:       ["Tags saved ✓", "ok"],
+        error:       ["Tags: save problem", "error"]
+      };
+      label = FILE[s.status] || FILE.local;
+      pill.title = s.fileName ? "Tags file: " + s.fileName : "Where your Cameo and Featured tags are saved";
+    }
+    pill.textContent = label[0];
+    pill.className = "pill " + label[1];
+
+    // Banner: one nudge at a time, most important first.
     const banner = $("tagsBanner");
     let content = null;
-    if (s.status === "local") {
+    let aboutTags = true;   // tag banners are hidden on the Data page, which shows the same choices
+
+    if (cloudTrouble()) {
+      content = [
+        el("span", { text: c.error || "Cloud sync stopped." }),
+        Cloud.signedIn() ? el("button", { class: "primary", text: "Try again", onclick: function () { Cloud.retry(); } }) : null,
+        el("button", { text: "Data page", onclick: function () { show("data"); } })
+      ];
+    } else if (Cloud.AVAILABLE && c.status === "signed-out" && !Prefs.get("cloudBannerDismissed", false)) {
+      content = [
+        el("span", { text: "Sign in with Google to keep your Cameo and Featured tags in the cloud and see them on all your devices." }),
+        el("button", { class: "primary", text: "Sign in with Google", onclick: signIn }),
+        el("button", {
+          text: "Not now",
+          onclick: function () { Prefs.set("cloudBannerDismissed", true); renderTagsStatus(); }
+        })
+      ];
+    } else if (Cloud.signedIn() || (Cloud.AVAILABLE && c.status === "loading")) {
+      content = null;   // tags are safe in the cloud (or sign-in is still being restored)
+    } else if (s.status === "local") {
       content = [
         el("span", { text: "Your Cameo and Featured tags are only saved in this browser. Choose a file to keep them permanently — a OneDrive folder is a good spot." }),
         el("button", { class: "primary", text: "Create tags file…", onclick: connectNew }),
@@ -129,8 +170,19 @@
         el("span", { text: "This browser can't save tags to a file, so they're kept in this browser only. Open the app in Edge or Chrome, or download a backup from the Data page." })
       ];
     }
-    // The Data page shows the same choices in full, so skip the banner there.
-    banner.hidden = !content || state.view === "data";
+
+    // Nothing to say about tags? Offer the card list on an empty device.
+    if (!content && !Store.size() && !state.job) {
+      aboutTags = false;
+      content = [
+        el("span", { text: "There are no cards on this device yet. Import the English card list? It takes about a minute." }),
+        el("button", { class: "primary needs-idle", text: "Import English cards", onclick: function () {
+          importAllSets(["en"], Prefs.get("includePocket", false));
+        } })
+      ];
+    }
+
+    banner.hidden = !content || (aboutTags && state.view === "data");
     if (content) { setChildren(banner, content); }
 
     updateCount();
@@ -138,12 +190,16 @@
   }
 
   $("tagsPill").addEventListener("click", function () {
-    if (Tags.state().status === "reconnect") {
+    if (!Cloud.signedIn() && Tags.state().status === "reconnect") {
       Tags.reconnect();
     } else {
       show("data");
     }
   });
+
+  function signIn() {
+    Cloud.signIn().catch(function (err) { alert(err.message); });
+  }
 
   function pickerError(err) {
     if (err && err.name === "AbortError") { return; } // picker cancelled
@@ -185,6 +241,34 @@
     $("jobDismiss").hidden = false;
     updateBusy();
     if (refreshResults) { refreshResults(); }
+    renderTagsStatus();
+  }
+
+  /** Imports every set for the given languages, oldest first. */
+  async function importAllSets(langs, includePocket) {
+    if (state.job) { return; }
+    const label = langs.length > 1 ? "all languages" : LANG_NAMES[langs[0]];
+
+    askPersistence();
+    const signal = startJob("import", "Importing every set — " + label);
+    renderTagsStatus();
+    try {
+      const r = await Importer.allSets(langs, {
+        signal: signal, onProgress: progress, includePocket: includePocket
+      });
+      let msg = plural(r.added, "new entry", "new entries") + " added from " + plural(r.setsImported, "set");
+      if (r.setsComplete) { msg += "; " + r.setsComplete + " already up to date"; }
+      if (r.pocketSets) { msg += "; " + r.pocketSets + " TCG Pocket set(s) skipped"; }
+      msg += r.cancelled ? ". Stopped — run it again to continue where it left off." : ".";
+      if (r.failedLangs.length) { msg += " Couldn't load: " + r.failedLangs.join(", ") + "."; }
+      if (r.failedSets.length) {
+        msg += " " + plural(r.failedSets.length, "set") + " failed (run again to retry): " +
+               r.failedSets.slice(0, 5).join(", ") + (r.failedSets.length > 5 ? "…" : "") + ".";
+      }
+      endJob(msg, false);
+    } catch (err) {
+      endJob("Import stopped: " + err.message + " Run it again to continue.", true);
+    }
   }
 
   /** Buttons marked .needs-idle are disabled while a job runs. */
@@ -205,6 +289,8 @@
 
   window.addEventListener("beforeunload", function (e) {
     const t = Tags.state();
+    // Cloud writes need no warning: every edit is already saved in this
+    // browser and is re-sent on the next visit if it didn't reach the cloud.
     if (state.job || (t.dirty && (t.status === "saving" || t.status === "saved"))) {
       Tags.flush();
       e.preventDefault();
@@ -329,31 +415,9 @@
     const aPocket = pocketBox();
     const goAll = el("button", { class: "primary needs-idle", text: "Import all sets", onclick: runAll });
 
-    async function runAll() {
-      if (state.job) { return; }
+    function runAll() {
       Prefs.set("aLang", aLang.value);
-      const langs = aLang.value === "all" ? LANG_CODES.slice() : [aLang.value];
-      const label = aLang.value === "all" ? "all languages" : LANG_NAMES[aLang.value];
-
-      askPersistence();
-      const signal = startJob("import", "Importing every set — " + label);
-      try {
-        const r = await Importer.allSets(langs, {
-          signal: signal, onProgress: progress, includePocket: aPocket.checked
-        });
-        let msg = plural(r.added, "new entry", "new entries") + " added from " + plural(r.setsImported, "set");
-        if (r.setsComplete) { msg += "; " + r.setsComplete + " already up to date"; }
-        if (r.pocketSets) { msg += "; " + r.pocketSets + " TCG Pocket set(s) skipped"; }
-        msg += r.cancelled ? ". Stopped — run it again to continue where it left off." : ".";
-        if (r.failedLangs.length) { msg += " Couldn't load: " + r.failedLangs.join(", ") + "."; }
-        if (r.failedSets.length) {
-          msg += " " + plural(r.failedSets.length, "set") + " failed (run again to retry): " +
-                 r.failedSets.slice(0, 5).join(", ") + (r.failedSets.length > 5 ? "…" : "") + ".";
-        }
-        endJob(msg, false);
-      } catch (err) {
-        endJob("Import stopped: " + err.message + " Run it again to continue.", true);
-      }
+      importAllSets(aLang.value === "all" ? LANG_CODES.slice() : [aLang.value], aPocket.checked);
     }
 
     // ---- One Pokémon.
@@ -666,12 +730,54 @@
         }
       }
 
+      // Cloud sync (live site only).
+      const c = Cloud.state();
+      const cloudButtons = [];
+      let cloudText = "";
+      let cloudClass = "status-local";
+      if (!Cloud.AVAILABLE) {
+        cloudText = "Cloud sync works on the live site, not from a file on this computer. This copy keeps tags in the tags file below.";
+        cloudButtons.push(el("a", { class: "button-link", href: LIVE_SITE, target: "_blank", rel: "noopener", text: "Open the live site" }));
+      } else if (c.status === "loading") {
+        cloudText = "Starting…";
+      } else if (c.status === "signed-out" || c.status === "signing-in") {
+        cloudText = "Sign in with Google and your tags sync to every device where you sign in — computers, phones and tablets.";
+        cloudButtons.push(el("button", { class: "primary", text: "Sign in with Google", disabled: c.status === "signing-in", onclick: signIn }));
+      } else if (c.status === "denied" || c.status === "error") {
+        cloudText = c.error;
+        cloudClass = "status-error";
+        if (Cloud.signedIn()) {
+          cloudButtons.push(el("button", { class: "primary", text: "Try again", onclick: function () { Cloud.retry(); } }));
+          cloudButtons.push(el("button", { text: "Sign out", onclick: function () { Cloud.signOut(); } }));
+        }
+      } else {
+        const SYNC = {
+          syncing: "Syncing…",
+          synced:  "Everything is up to date.",
+          offline: "Offline — edits are saved on this device and will sync when you're back online."
+        };
+        cloudText = "Signed in as " + c.email + ". " + (SYNC[c.status] || "");
+        cloudClass = c.status === "synced" ? "status-saved" : "status-local";
+        cloudButtons.push(el("button", {
+          text: "Sign out",
+          onclick: function () {
+            if (confirm("Sign out of cloud sync on this device? Your tags stay here, and in the cloud.")) {
+              Cloud.signOut();
+            }
+          }
+        }));
+      }
+
       setChildren(tagsBox,
         el("h2", { text: "Cameo & Featured tags" }),
         el("p", { class: "lead", text: plural(Tags.count(), "card") + " tagged. Tags are your own data: they're kept separately from the card catalog, so importing or deleting cards never touches them." }),
+        el("h3", { text: "Cloud sync" }),
+        el("p", { class: "status-line " + cloudClass, text: cloudText }),
+        cloudButtons.length ? el("div", { class: "row wrap" }, cloudButtons) : null,
+        el("h3", { text: "Tags file" }),
         el("p", { class: "status-line status-" + s.status, text: STATUS[s.status] || "" }),
         buttons.length ? el("div", { class: "row wrap" }, buttons) : null,
-        el("p", { class: "hint", text: "Tip: put the file in your OneDrive (or other synced) folder so it's backed up. Two computers can share the same file — each save merges, keeping the newest edit for every card." }),
+        el("p", { class: "hint", text: "Tip: put the file in your OneDrive (or other synced) folder so it's backed up. With cloud sync on, the file is an extra copy — cloud edits are written into it too." }),
         el("h3", { text: "Backups" }),
         el("div", { class: "row wrap" },
           el("button", {
@@ -927,7 +1033,7 @@
   const scheduleRefresh = debounce(function () {
     if (refreshSetOptions) { refreshSetOptions(); }
     if (refreshResults) { refreshResults(); }
-    if (refreshDataView) { refreshDataView(); }
+    renderTagsStatus();   // also refreshes the Data page
   }, function () { return state.job ? 2500 : 400; });
 
   Store.onChange(function () {
@@ -943,6 +1049,8 @@
       if (!state.quiet) { scheduleRefresh(); }
     }
   });
+
+  Cloud.onChange(renderTagsStatus);
 
   /** First-version rows kept cameo on the card row — move them into Tags. */
   function migrateOldCameos(rawRows) {
@@ -967,6 +1075,8 @@
         renderNav();
       }
       renderView();
+      // Cloud sync starts after tags are loaded, so the first merge sees them.
+      return Cloud.init();
     })
     .catch(function (err) {
       setChildren($("view"), el("div", { class: "panel" },

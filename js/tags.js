@@ -14,6 +14,10 @@
  * file — also to master-set-tags.json in a folder of your choice
  * (e.g. OneDrive). Every save re-reads the file and merges by
  * newest edit, so two computers sharing it don't wipe each other.
+ *
+ * Cloud sync (cloud.js) listens for changes here and merges cloud
+ * edits back in through mergeIncoming(), using the same rule:
+ * per card, the newest edit wins.
  * ==========================================================
  */
 "use strict";
@@ -39,9 +43,13 @@ const Tags = (function () {
   let queue = Promise.resolve();
 
 
-  /** kind: "data" (tags changed) or "status" (file/save state changed). */
-  function emit(kind) {
-    listeners.forEach(function (fn) { fn(kind); });
+  /**
+   * kind:    "data" (tags changed) or "status" (file/save state changed)
+   * records: for "data", the tags that changed
+   * source:  where the change came from — "edit", "file", "backup" or "cloud"
+   */
+  function emit(kind, records, source) {
+    listeners.forEach(function (fn) { fn(kind, records || [], source || ""); });
   }
 
   function setStatus(s, error) {
@@ -120,12 +128,16 @@ const Tags = (function () {
 
   /**
    * Merges incoming tags: per card, the newest edit wins.
-   * @return {Object}  { changed: [tags updated here], localNewer: bool }
+   *
+   * @param {Object[]} list  normalised tags
+   * @param {boolean} full   true when list is the other side's complete set,
+   *                         so tags missing from it count as "newer here"
+   * @return {Object}  { changed: [tags updated here], newer: [tags newer here] }
    */
-  function merge(list) {
+  function merge(list, full) {
     const changed = [];
+    const newer = [];
     const seen = new Set();
-    let localNewer = false;
 
     list.forEach(function (t) {
       if (!t.cardId) { return; }
@@ -135,14 +147,16 @@ const Tags = (function () {
         tags.set(t.cardId, t);
         changed.push(t);
       } else if (mine.updated > t.updated) {
-        localNewer = true;
+        newer.push(mine);
       }
     });
-    tags.forEach(function (t, id) {
-      if (!seen.has(id)) { localNewer = true; }
-    });
+    if (full) {
+      tags.forEach(function (t, id) {
+        if (!seen.has(id)) { newer.push(t); }
+      });
+    }
 
-    return { changed: changed, localNewer: localNewer };
+    return { changed: changed, newer: newer };
   }
 
 
@@ -168,16 +182,16 @@ const Tags = (function () {
     } catch (err) {
       throw new Error("Couldn't read " + handle.name + " (was it moved or deleted?). Choose it again on the Data page.");
     }
-    const r = merge(parse(text));
+    const r = merge(parse(text), true);
     await persist(r.changed);
 
-    if (r.localNewer || dirty) {
+    if (r.newer.length || dirty) {
       const w = await handle.createWritable();
       await w.write(serialize());
       await w.close();
     }
     dirty = false;
-    if (r.changed.length) { emit("data"); }
+    if (r.changed.length) { emit("data", r.changed, "file"); }
   }
 
   /** Writes pending edits (serialised so saves never overlap). */
@@ -306,8 +320,30 @@ const Tags = (function () {
       if (label) { next.label = str(label, 200); }
       tags.set(cardId, next);
       persist([next]).catch(function (err) { setStatus("error", err.message); });
-      emit("data");
+      emit("data", [next], "edit");
       scheduleSave();
+    },
+
+    /** Every tag (for cloud sync). */
+    all: function () { return Array.from(tags.values()); },
+
+    /**
+     * Merges tags from another source (the cloud). Changed tags are saved
+     * here and to the tags file, if one is linked.
+     *
+     * @param {Object[]} list   raw tags { cardId, cameo, featured, label, updated }
+     * @param {string} source   e.g. "cloud"
+     * @param {boolean} full    true when list is that source's complete set
+     * @return {Promise<Object>}  { changed, newer } — newer = tags to send back
+     */
+    mergeIncoming: async function (list, source, full) {
+      const r = merge(list.map(function (t) { return normalize(t.cardId, t); }), full);
+      await persist(r.changed);
+      if (r.changed.length) {
+        emit("data", r.changed, source);
+        if (handle) { scheduleSave(); }
+      }
+      return r;
     },
 
     /** Create a new tags file (or overwrite-merge an existing one). */
@@ -358,10 +394,10 @@ const Tags = (function () {
     /** Merges a tags file or backup. Resolves to the number of tags read. */
     importJson: async function (text) {
       const list = parse(text);
-      const r = merge(list);
+      const r = merge(list, false);
       await persist(r.changed);
       if (r.changed.length) {
-        emit("data");
+        emit("data", r.changed, "backup");
         scheduleSave();
       }
       return list.length;

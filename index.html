@@ -4,12 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!--
-  Security: the page may only run its own scripts and styles, and may
-  only talk to TCGdex (card data + images). Nothing else can load, and
-  no data can be sent anywhere else.
+  Security: the page may only run its own scripts and styles (plus
+  Google's sign-in helper), and may only talk to:
+    - TCGdex (card data + images)
+    - Google sign-in (identitytoolkit, securetoken, the project's
+      firebaseapp.com sign-in frame)
+    - Firestore (your synced tags)
+  Nothing else can load, and no data can be sent anywhere else.
 -->
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://assets.tcgdex.net; connect-src https://api.tcgdex.net; base-uri 'none'; form-action 'none'; object-src 'none'">
+      content="default-src 'none'; script-src 'self' https://apis.google.com; style-src 'self'; img-src 'self' data: blob: https://assets.tcgdex.net; connect-src https://api.tcgdex.net https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com; frame-src https://master-set-companion.firebaseapp.com; base-uri 'none'; form-action 'none'; object-src 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Master Set Companion</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23fff' stroke='%23222' stroke-width='2.5'/%3E%3Cpath d='M2 16h28' stroke='%23222' stroke-width='2.5'/%3E%3Cpath d='M3.5 15a12.5 12.5 0 0 1 25 0z' fill='%23d63c3c'/%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%23fff' stroke='%23222' stroke-width='2.5'/%3E%3C/svg%3E">
@@ -52,6 +56,8 @@
 <script src="js/util.js"></script>
 <script src="js/store.js"></script>
 <script src="js/tags.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/cloud.js"></script>
 <script src="js/api.js"></script>
 <script src="js/importer.js"></script>
 <script src="js/cricut.js"></script>
