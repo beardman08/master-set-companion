@@ -10,7 +10,7 @@ Live site: **https://beardman08.github.io/master-set-companion/**
 | Section | What it does |
 |---|---|
 | **Import** | **Every set** for a language (or all languages), oldest first. Also **one Pokémon** (dex number or name) or **one set**. Stopping keeps progress, and re-running carries on where it left off. TCG Pocket (digital-only) cards are skipped unless you tick the box. |
-| **Collection** | Every card in **set release order**. Filter it, edit **Featured** and **Cameo** tags, and remove cards. |
+| **Collection** | Every card in **set release order**, with Small / Medium / Large images. Filter it, edit **Featured** and **Cameo** tags, and remove cards. Click a card image (or **Large view**) to tag cards one at a time at full size, with a **Find a Pokémon** box that turns names into dex numbers. |
 | **Print** | Letter, 3×3 cards at real size. Print or Save as PDF at Scale 100%. Up to 900 cards per print. |
 | **Cricut export** | Print-Then-Cut sheets (300 DPI PNG plus a matching cut-line SVG) for Letter, Legal or Tabloid. Download each file or everything as one ZIP. Up to 100 sheets per export. |
 | **Data** | Cloud sync, the tags file, backups, and the card catalog. |
@@ -82,6 +82,7 @@ js/vendor/firebase-12.19.0 Firebase SDK (compat builds) + license
 js/api.js                  TCGdex requests with retry; English bulk set requests; finishes per card
 js/importer.js             import every set, one Pokémon, or one set
 js/cricut.js               Cricut sheet rendering and cut-line SVG
+js/pokedex.js              Pokémon names by National Dex number (from PokéAPI) + name search
 js/app.js                  the interface
 ```
 

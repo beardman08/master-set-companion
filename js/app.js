@@ -745,6 +745,15 @@
     const counter = el("span", { class: "viewer-count" });
     const cameo   = el("input", { type: "text", autocomplete: "off", placeholder: "e.g. 25, 133" });
     const featured = el("input", { type: "text", autocomplete: "off" });
+    const cameoNames = el("p", { class: "cameo-names", "aria-live": "polite" });
+    const lookup  = el("input", {
+      type: "search", autocomplete: "off", spellcheck: "false",
+      placeholder: "Type a name, e.g. Pikachu",
+      "aria-label": "Find a Pokémon's dex number", "aria-controls": "dexSuggest"
+    });
+    const suggestions = el("div", { class: "dex-suggest", id: "dexSuggest", role: "listbox", hidden: true });
+    let matches = [];
+    let active = 0;
     const prevBtn = el("button", { text: "← Previous", onclick: function () { go(i - 1); } });
     const nextBtn = el("button", { class: "primary", text: "Next →", onclick: function () { go(i + 1); } });
 
@@ -759,6 +768,10 @@
                          onclick: function () { closeViewer(); } })),
         title, meta, more,
         field("Cameo (dex numbers of other Pokémon in the art)", cameo),
+        cameoNames,
+        el("div", { class: "dex-find" },
+          field("Find a Pokémon — click a match to add its number to Cameo", lookup),
+          suggestions),
         field("Featured", featured),
         el("p", { class: "hint", text: "Tags apply to every finish of this card. Enter saves and goes to the next card; Esc closes." }),
         el("div", { class: "row viewer-nav" }, prevBtn, nextBtn))));
@@ -804,6 +817,9 @@
                          (c.dex ? " · Dex " + c.dex : "");
       cameo.value = Collection.cameo(c);
       featured.value = Collection.featured(c);
+      lookup.value = "";
+      showMatches([]);
+      showCameoNames();
       prevBtn.disabled = i === 0;
       nextBtn.disabled = i === cards.length - 1;
       // On a computer, be ready to type. On a phone, don't pop the keyboard
@@ -818,6 +834,76 @@
         if (n && n.imageUrl) { new Image().src = n.imageUrl; }
       });
     }
+
+    // ---- "Find a Pokémon": name -> dex number, added to Cameo.
+
+    /** Spells out the Cameo numbers ("25 Pikachu, 133 Eevee") so typos stand out. */
+    function showCameoNames() {
+      const tokens = cameo.value.split(/[;,]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+      cameoNames.textContent = tokens.map(function (t) {
+        if (!/^\d+$/.test(t)) { return t; }
+        const name = Pokedex.name(t);
+        return name ? "#" + t + " " + name : "#" + t + " (no such Pokémon)";
+      }).join(", ");
+      cameoNames.hidden = !tokens.length;
+    }
+
+    function showMatches(list) {
+      matches = list;
+      active = 0;
+      suggestions.hidden = !list.length;
+      setChildren(suggestions, list.map(function (m, n) {
+        return el("button", {
+          type: "button", role: "option", tabindex: "-1",
+          class: n === active ? "active" : "",
+          "aria-selected": String(n === active),
+          onclick: function () { addToCameo(m.dex); }
+        }, el("span", { class: "dex-no", text: "#" + m.dex }), el("span", { text: m.name }));
+      }));
+    }
+
+    function highlight(n) {
+      if (!matches.length) { return; }
+      active = (n + matches.length) % matches.length;
+      Array.prototype.forEach.call(suggestions.children, function (b, k) {
+        b.className = k === active ? "active" : "";
+        b.setAttribute("aria-selected", String(k === active));
+        if (k === active) { b.scrollIntoView({ block: "nearest" }); }
+      });
+    }
+
+    /** Adds a dex number to Cameo (once), saves, and readies the box for the next name. */
+    function addToCameo(dex) {
+      const tokens = cameo.value.split(/[;,]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+      if (tokens.indexOf(String(dex)) === -1) { tokens.push(String(dex)); }
+      cameo.value = tokens.join(", ");
+      commit();
+      showCameoNames();
+      lookup.value = "";
+      showMatches([]);
+      lookup.focus();
+    }
+
+    lookup.addEventListener("input", function () {
+      showMatches(Pokedex.search(lookup.value, 8));
+    });
+
+    lookup.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown") { e.preventDefault(); highlight(active + 1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); highlight(active - 1); }
+      else if (e.key === "Enter") {
+        e.preventDefault();
+        if (matches.length) { addToCameo(matches[active].dex); }
+      } else if (e.key === "Escape" && lookup.value) {
+        // First Esc clears the search; the next one closes the viewer.
+        e.preventDefault();
+        e.stopPropagation();
+        lookup.value = "";
+        showMatches([]);
+      }
+    });
+
+    cameo.addEventListener("input", showCameoNames);
 
     [cameo, featured].forEach(function (inp) {
       inp.addEventListener("keydown", function (e) {

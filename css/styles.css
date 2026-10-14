@@ -394,6 +394,34 @@ dialog.viewer::backdrop { background: rgba(0, 0, 0, .6); }
 .viewer-meta { color: var(--ink-2); }
 .viewer-more { color: var(--ink-3); font-size: 13px; }
 .viewer-nav { margin-top: auto; justify-content: space-between; }
+
+/* Cameo numbers spelled out, and the "Find a Pokémon" box. */
+.cameo-names { margin-top: -6px; font-size: 13px; color: var(--ink-2); }
+.dex-find { position: relative; }
+.dex-suggest {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  max-height: 232px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.dex-suggest button {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.dex-suggest button:last-child { border-bottom: 0; }
+.dex-suggest button.active,
+.dex-suggest button:hover:not(:disabled) { background: var(--accent-soft); }
+.dex-no { min-width: 48px; font-variant-numeric: tabular-nums; color: var(--ink-2); font-weight: 600; }
 .viewer-nav button { flex: 1; }
 .cards .name { font-weight: 600; }
 .cards .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
